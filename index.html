@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expense Tracker</title>
+<style>
+:root{--bg:#eef3f1;--card:#fff;--ink:#10231c;--muted:#566b62;--line:#d5e0db;--inc:#1b7f4d;--exp:#c2255c;--btn:#10231c;--btn-ink:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1a15;--card:#162a22;--ink:#e6f2ec;--muted:#9bb5a9;--line:#27443a;--inc:#51cf8d;--exp:#ff7aa2;--btn:#51cf8d;--btn-ink:#0e1a15}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.45}
+main{max-width:640px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:1.6rem;margin:0 0 16px}
+h2{font-size:1rem;margin:22px 0 8px;color:var(--muted);font-weight:600}
+.sum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.sum div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;min-width:0}
+.sum span{display:block;color:var(--muted);font-size:.8rem}
+.sum b{font-size:1.05rem;overflow-wrap:anywhere}
+.inc{color:var(--inc)} .exp{color:var(--exp)}
+form{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;display:grid;gap:10px;margin-top:16px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row>*,form>*{min-width:0}
+label{font-size:.85rem;color:var(--muted);display:grid;gap:4px}
+input,select,button{font:inherit;color:inherit}
+input,select{width:100%;min-width:0;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+input[type=date],input[type=month]{-webkit-appearance:none;appearance:none;display:block;min-height:44px}
+button{cursor:pointer;border-radius:8px;border:1px solid var(--line);background:transparent;padding:8px 12px}
+button.primary{background:var(--btn);color:var(--btn-ink);border-color:var(--btn);font-weight:600;padding:11px}
+:focus-visible{outline:3px solid var(--inc);outline-offset:2px}
+.err{color:var(--exp);font-size:.85rem;min-height:1.2em;margin:0}
+.filters{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.bars{display:grid;gap:8px}
+.bar .top{display:flex;justify-content:space-between;font-size:.9rem}
+.bar .track{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:3px}
+.bar .fill{height:100%;background:var(--exp)}
+ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+li{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center}
+li .n{font-weight:600;overflow-wrap:anywhere}
+li .m{font-size:.8rem;color:var(--muted)}
+li .a{font-weight:700;white-space:nowrap}
+li button{padding:6px 10px;font-size:.8rem}
+.empty{text-align:center;color:var(--muted);padding:24px 8px;border:1px dashed var(--line);border-radius:10px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Expense Tracker</h1>
+  <section class="sum" aria-label="Summary">
+    <div><span>Income</span><b class="inc" id="sInc">0</b></div>
+    <div><span>Expenses</span><b class="exp" id="sExp">0</b></div>
+    <div><span>Balance</span><b id="sBal">0</b></div>
+  </section>
+
+  <form id="form" novalidate>
+    <div class="row">
+      <label>Type
+        <select id="type"><option value="expense">Expense</option><option value="income">Income</option></select>
+      </label>
+      <label>Category
+        <select id="category"></select>
+      </label>
+    </div>
+    <div class="row">
+      <label>Amount (&#8377;)
+        <input type="number" id="amount" inputmode="decimal" min="0" step="0.01" placeholder="0.00">
+      </label>
+      <label>Date
+        <input type="date" id="date">
+      </label>
+    </div>
+    <label>Note (optional)
+      <input type="text" id="note" maxlength="60" placeholder="e.g. Lunch with team" autocomplete="off">
+    </label>
+    <p class="err" id="err" role="alert"></p>
+    <button class="primary" type="submit">Add transaction</button>
+  </form>
+
+  <h2>Filters</h2>
+  <div class="filters">
+    <label>Month
+      <input type="month" id="fMonth">
+    </label>
+    <label>Type
+      <select id="fType"><option value="all">All</option><option value="expense">Expenses</option><option value="income">Income</option></select>
+    </label>
+  </div>
+
+  <h2>Spending by category</h2>
+  <div class="bars" id="bars"></div>
+
+  <h2>Transactions</h2>
+  <ul id="list"></ul>
+</main>
+
+<script>
+(function () {
+  var KEY = "expense-tracker.transactions";
+  var CATS = {
+    expense: ["Food", "Transport", "Rent", "Shopping", "Bills", "Health", "Other"],
+    income: ["Salary", "Freelance", "Other"]
+  };
+  var txs = load();
+
+  var $ = function (id) { return document.getElementById(id); };
+  var form = $("form"), typeEl = $("type"), catEl = $("category"), amtEl = $("amount"),
+      dateEl = $("date"), noteEl = $("note"), errEl = $("err"),
+      fMonth = $("fMonth"), fType = $("fType"), listEl = $("list"), barsEl = $("bars");
+
+  var money = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
+
+  function load() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(txs)); } catch (e) {} }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function today() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  function fillCategories() {
+    catEl.innerHTML = CATS[typeEl.value].map(function (c) {
+      return "<option>" + c + "</option>";
+    }).join("");
+  }
+  typeEl.addEventListener("change", fillCategories);
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var amount = Math.round(parseFloat(amtEl.value) * 100) / 100;
+    if (!(amount > 0)) { errEl.textContent = "Enter an amount greater than 0."; amtEl.focus(); return; }
+    if (!dateEl.value) { errEl.textContent = "Choose a date."; dateEl.focus(); return; }
+    errEl.textContent = "";
+    txs.push({
+      id: Date.now(), type: typeEl.value, category: catEl.value,
+      amount: amount, date: dateEl.value, note: noteEl.value.trim()
+    });
+    save();
+    amtEl.value = "";
+    noteEl.value = "";
+    render();
+  });
+
+  listEl.addEventListener("click", function (e) {
+    if (e.target.dataset.act !== "delete") return;
+    var id = Number(e.target.closest("li").dataset.id);
+    txs = txs.filter(function (t) { return t.id !== id; });
+    save();
+    render();
+  });
+
+  fMonth.addEventListener("input", render);
+  fType.addEventListener("change", render);
+
+  function sum(arr, type) {
+    return arr.filter(function (t) { return t.type === type; })
+      .reduce(function (s, t) { return s + t.amount; }, 0);
+  }
+
+  function render() {
+    var shown = txs.filter(function (t) {
+      if (fMonth.value && t.date.slice(0, 7) !== fMonth.value) return false;
+      if (fType.value !== "all" && t.type !== fType.value) return false;
+      return true;
+    }).sort(function (a, b) { return b.date.localeCompare(a.date) || b.id - a.id; });
+
+    var inc = sum(shown, "income"), exp = sum(shown, "expense");
+    $("sInc").textContent = money.format(inc);
+    $("sExp").textContent = money.format(exp);
+    $("sBal").textContent = money.format(inc - exp);
+
+    // spending by category (expenses only)
+    var byCat = {};
+    shown.forEach(function (t) {
+      if (t.type === "expense") byCat[t.category] = (byCat[t.category] || 0) + t.amount;
+    });
+    var rows = Object.keys(byCat).sort(function (a, b) { return byCat[b] - byCat[a]; });
+    barsEl.innerHTML = rows.length ? rows.map(function (c) {
+      var pct = exp ? Math.round(byCat[c] / exp * 100) : 0;
+      return '<div class="bar"><div class="top"><span>' + esc(c) + "</span><span>" + money.format(byCat[c]) +
+        " (" + pct + '%)</span></div><div class="track"><div class="fill" style="width:' + pct + '%"></div></div></div>';
+    }).join("") : '<div class="empty">No expenses to show yet.</div>';
+
+    listEl.innerHTML = shown.length ? shown.map(function (t) {
+      var sign = t.type === "income" ? "+" : "-";
+      return '<li data-id="' + t.id + '"><div><div class="n">' + esc(t.note || t.category) + '</div><div class="m">' +
+        esc(t.category) + " \u2022 " + esc(t.date) + '</div></div><div class="a ' + (t.type === "income" ? "inc" : "exp") + '">' +
+        sign + money.format(t.amount) + '</div><button type="button" data-act="delete">Delete</button></li>';
+    }).join("") : '<li class="empty" style="display:block">No transactions found.</li>';
+  }
+
+  dateEl.value = today();
+  fillCategories();
+  render();
+})();
+</script>
+</body>
+</html>
